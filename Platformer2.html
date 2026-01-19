@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Aiden's Nightmare: Rainbow Singularity</title>
+    <style>
+        body { 
+            display: flex; flex-direction: column; align-items: center; 
+            background-color: #050505; color: #ff0055; 
+            font-family: 'Courier New', monospace; margin: 0; padding: 20px; overflow: hidden; 
+        }
+        canvas { 
+            border: 4px solid #ff0055; box-shadow: 0 0 30px rgba(255, 0, 85, 0.4); 
+            display: block; background: #000; transition: border-color 0.1s;
+        }
+        .stats { 
+            margin-top: 10px; font-size: 16px; display: flex; gap: 20px; 
+            text-transform: uppercase; letter-spacing: 1px; 
+        }
+        #winOverlay { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: rgba(255,0,0,0.95); color: white; padding: 50px; 
+            border: 10px double white; text-align: center; display: none; z-index: 10; 
+        }
+        .highlight { color: #00ffff; }
+    </style>
+</head>
+<body>
+    <h1 id="levelTitle">LEVEL 1: CORRUPTED GARDEN</h1>
+    <div class="stats">
+        <span>TIME: <b id="timerStat">0.00</b>s</span>
+        <span>DEATHS: <b id="deathStat">0</b></span>
+        <span>BEST: <b id="bestStat" class="highlight">--</b></span>
+    </div>
+
+    <div id="winOverlay">
+        <h1>SINGULARITY BREACHED</h1>
+        <p id="winMessage"></p>
+        <button onclick="location.reload()" style="padding: 15px 30px; cursor: pointer; background: white; color: black; border: none; font-weight: bold; margin-top: 20px;">RESET TIMELINE</button>
+    </div>
+
+    <canvas id="gameCanvas" width="900" height="450"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const levelNames = {
+            1: "LEVEL 1: CORRUPTED GARDEN", 2: "LEVEL 2: NEON ABYSS", 
+            3: "LEVEL 3: HEAVY METAL", 4: "LEVEL 4: CLOUD CITY", 5: "LEVEL 5: THE SINGULARITY"
+        };
+
+        let currentLevel = 1; let worldPosition = 0; let deaths = 0;
+        let gameActive = true; let startTime = Date.now();
+        let frameCount = 0; let shakeFrames = 0;
+        
+        const playerSize = 36; const playerScreenX = 150; 
+        let playerY = 0; let yVelocity = 0;
+        let isGrounded = false; let coyoteFrames = 0; let jumpBuffer = 0; 
+        
+        let gravity = 0.95; let jumpStrength = -19.5; let scrollSpeed = 9;
+
+        let bestDeaths = localStorage.getItem('aidenBestDeaths');
+        if (bestDeaths) document.getElementById('bestStat').innerText = bestDeaths;
+
+        const levels = {
+            1: [{x:0,y:380,w:300,h:70,color:"#004400"}, {x:550,y:320,w:80,h:20,color:"#00ff41"}, {x:850,y:250,w:60,h:20,color:"#00ff41"}, {x:1200,y:330,w:100,h:120,color:"#004400"}, {x:1550,y:220,w:60,h:20,color:"#00ff41"}, {x:1950,y:300,w:150,h:20,color:"#00ff41"}],
+            2: [{x:0,y:380,w:200,h:70,color:"#330033"}, {x:500,y:300,w:25,h:20,color:"#ff00ff"}, {x:800,y:220,w:25,h:20,color:"#00ffff"}, {x:1100,y:320,w:25,h:20,color:"#ff00ff"}, {x:1400,y:220,w:50,h:250,color:"#330033"}, {x:1750,y:300,w:60,h:20,color:"#ff00ff"}],
+            3: [{x:0,y:380,w:150,h:50,color:"#222"}, {x:390,y:330,w:40,h:20,color:"#555"}, {x:700,y:300,w:50,h:20,color:"#00ffff",moveV:100}, {x:1050,y:200,w:40,h:20,color:"#aaa"}, {x:1350,y:300,w:50,h:20,color:"#00ffff",moveV:80}, {x:1700,y:250,w:40,h:20,color:"#888"}, {x:2000,y:320,w:150,h:20,color:"#555"}],
+            4: [{x:0,y:380,w:250,h:50,color:"#1a1a1a"}, {x:500,y:280,w:60,h:15,color:"#fff"}, {x:900,y:250,w:60,h:15,color:"#00ffff",moveH:150}, {x:1400,y:180,w:60,h:15,color:"#fff"}, {x:1800,y:250,w:60,h:15,color:"#00ffff",moveH:100}, {x:2200,y:300,w:100,h:15,color:"#fff"}],
+            5: [
+                {x:0,y:380,w:200,h:50,color:"#440000"}, {x:450,y:300,w:40,h:20,color:"#ff0000"}, {x:850,y:220,w:30,h:20,color:"#ff0000"}, {x:1250,y:340,w:30,h:20,color:"#ff0000"}, {x:1600,y:200,w:50,h:20,color:"#00ffff",moveV:120}, {x:2000,y:380,w:60,h:20,color:"#ff0000"}, 
+                {x:2440,y:206,w:25,h:10,color:"#ffffff"}, // FIXED: Tuned jump distance
+                {x:2750,y:350,w:200,h:100,color:"#440000"} 
+            ]
+        };
+
+        const keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') jumpBuffer = 6;
+        });
+        document.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+
+        function resetToSpawn() {
+            deaths++; document.getElementById('deathStat').innerText = deaths;
+            worldPosition = 0; playerY = -50; yVelocity = 0; isGrounded = false; shakeFrames = 10;
+        }
+
+        function getPos(b) {
+            let res = { x: b.x, y: b.y };
+            if (b.moveV) res.y += Math.sin(frameCount / 30) * b.moveV;
+            if (b.moveH) res.x += Math.cos(frameCount / 30) * b.moveH;
+            return res;
+        }
+
+        function checkCollisions() {
+            let curBlocks = levels[currentLevel];
+            let stoodOnPlatform = false;
+            for (let b of curBlocks) {
+                const pos = getPos(b); const bX = pos.x - worldPosition;
+                if (playerScreenX + playerSize > bX && playerScreenX < bX + b.w) {
+                    if (playerY + playerSize > pos.y && playerY < pos.y + b.h) {
+                        if (yVelocity >= 0 && (playerY + playerSize - yVelocity) <= pos.y + 25) {
+                            if (!isGrounded && yVelocity > 8) shakeFrames = 5;
+                            playerY = pos.y - playerSize; yVelocity = 0; stoodOnPlatform = true;
+                        } else {
+                            if (playerScreenX < bX) worldPosition -= scrollSpeed; else worldPosition += scrollSpeed;
+                        }
+                    }
+                }
+            }
+            if (stoodOnPlatform) { isGrounded = true; coyoteFrames = 8; } 
+            else { if (coyoteFrames > 0) coyoteFrames--; if (coyoteFrames === 0) isGrounded = false; }
+            if (playerY + playerSize >= canvas.height - 10) resetToSpawn();
+        }
+
+        function update() {
+            if (!gameActive) return; frameCount++;
+            if (shakeFrames > 0) shakeFrames--;
+            document.getElementById('timerStat').innerText = ((Date.now() - startTime) / 1000).toFixed(2);
+
+            if (keys['arrowleft'] || keys['a']) worldPosition -= scrollSpeed;
+            if (keys['arrowright'] || keys['d']) worldPosition += scrollSpeed;
+            if (worldPosition < 0) worldPosition = 0;
+
+            let portalTrigger = (currentLevel === 5) ? 2750 : 2100; 
+            if (worldPosition + playerScreenX >= portalTrigger) {
+                if (currentLevel < 5) {
+                    currentLevel++;
+                    if (currentLevel === 2) { gravity = 1.05; scrollSpeed = 9.5; }
+                    if (currentLevel === 3) { gravity = 1.15; scrollSpeed = 10; }
+                    if (currentLevel === 4) { gravity = 0.35; jumpStrength = -13; scrollSpeed = 8; }
+                    if (currentLevel === 5) { gravity = 1.35; jumpStrength = -25; scrollSpeed = 11; }
+                    document.getElementById('levelTitle').innerText = levelNames[currentLevel];
+                    resetToSpawn(); deaths--; 
+                } else {
+                    gameActive = false;
+                    if (!bestDeaths || deaths < parseInt(bestDeaths)) localStorage.setItem('aidenBestDeaths', deaths);
+                    document.getElementById('winMessage').innerText = `TIME: ${document.getElementById('timerStat').innerText}s | DEATHS: ${deaths}`;
+                    document.getElementById('winOverlay').style.display = "block";
+                }
+            }
+            if (jumpBuffer > 0 && (isGrounded || coyoteFrames > 0)) { 
+                yVelocity = jumpStrength; isGrounded = false; coyoteFrames = 0; jumpBuffer = 0;
+            }
+            if (jumpBuffer > 0) jumpBuffer--;
+            yVelocity += gravity; playerY += yVelocity; checkCollisions();
+        }
+
+        function draw() {
+            ctx.save();
+            if (shakeFrames > 0) ctx.translate(Math.random()*6-3, Math.random()*6-3);
+            
+            // Rainbow Frame Logic
+            if (currentLevel === 5) {
+                canvas.style.borderColor = `hsl(${frameCount * 5}, 100%, 50%)`;
+                let pulse = Math.abs(Math.sin(frameCount / 10)) * 40;
+                ctx.fillStyle = `rgb(${pulse}, 0, 0)`;
+            } else {
+                ctx.fillStyle = "#000";
+            }
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            let portalX = (currentLevel === 5) ? 2750 - worldPosition : 2100 - worldPosition;
+            ctx.fillStyle = "#fff"; ctx.fillRect(portalX, 0, 10, canvas.height); ctx.fillRect(portalX, 40, 40, 30);
+            
+            levels[currentLevel].forEach(b => { 
+                const pos = getPos(b); ctx.fillStyle = b.color; ctx.fillRect(Math.floor(pos.x - worldPosition), pos.y, b.w, b.h); 
+                ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.strokeRect(Math.floor(pos.x - worldPosition), pos.y, b.w, b.h);
+            });
+            ctx.fillStyle = "#ff0055"; ctx.fillRect(0, canvas.height - 10, canvas.width, 10);
+            ctx.fillStyle = "#fff"; ctx.shadowBlur = (currentLevel === 5) ? 20 : 0; ctx.shadowColor = `hsl(${frameCount * 10}, 100%, 50%)`;
+            ctx.fillRect(playerScreenX, Math.floor(playerY), playerSize, playerSize);
+            ctx.fillStyle = "black"; ctx.shadowBlur = 0;
+            let eyeX = (keys['arrowright'] || keys['d']) ? playerScreenX + 20 : (keys['arrowleft'] || keys['a']) ? playerScreenX + 6 : playerScreenX + 13;
+            ctx.fillRect(eyeX, Math.floor(playerY) + 8, 8, 8);
+            ctx.restore();
+        }
+
+        function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
+        resetToSpawn(); deaths = 0; document.getElementById('deathStat').innerText = deaths; gameLoop();
+    </script>
+</body>
+</html>
